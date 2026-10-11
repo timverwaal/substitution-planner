@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Substitution Planner</title>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--tx:#1b1f24;--mu:#667;--ac:#1e7a46;--ac2:#e6f4ec;--bd:#dde1e6;--bad:#c0392b;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#111418;--card:#1c2127;--tx:#eceff2;--mu:#98a;--ac:#3fb878;--ac2:#18382a;--bd:#2d343c;--bad:#e5645a}}
+:root[data-theme="dark"]{--bg:#111418;--card:#1c2127;--tx:#eceff2;--mu:#98a;--ac:#3fb878;--ac2:#18382a;--bd:#2d343c;--bad:#e5645a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:16px system-ui,sans-serif}
+main{max-width:560px;margin:0 auto;padding:12px 12px 80px}
+.tabs{display:flex;position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);z-index:5;gap:6px;padding:8px 12px;max-width:560px;margin:0 auto}
+.tabs button{flex:1;padding:12px 4px;border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:10px;font-size:15px}
+.tabs button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px}
+h2{margin:0 0 10px;font-size:18px}label{display:block;font-size:14px;color:var(--mu);margin:10px 0 4px}
+input[type=text],input[type=number]{width:100%;padding:12px;font-size:17px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx)}
+.row{display:flex;gap:8px}.row>*{flex:1}
+.btn{padding:12px 16px;border:0;border-radius:10px;background:var(--ac);color:#fff;font-size:16px}
+.btn.s{background:var(--ac2);color:var(--ac)}.btn.x{background:none;color:var(--bad);flex:0;padding:8px 12px}
+.btn.sm{padding:8px 10px;font-size:13px}.btn.bd{background:var(--bad);color:#fff}
+.pl{display:flex;align-items:center;padding:10px 0;border-bottom:1px solid var(--bd);gap:10px}.pl:last-child{border:0}
+.pl span{flex:1}.pl input[type=checkbox]{width:22px;height:22px;accent-color:var(--ac)}
+.err{color:var(--bad);font-size:15px}.mu{color:var(--mu);font-size:14px}
+.big{font-size:44px;font-weight:700;text-align:center;font-variant-numeric:tabular-nums}
+.ev{padding:10px;border-radius:8px;border:1px solid var(--bd);margin-bottom:8px}
+.ev.next{border-color:var(--ac);background:var(--ac2)}.ev.done{opacity:.45}
+.in{color:var(--ac)}.out{color:var(--bad)}
+.btn:disabled{opacity:.4}.ac{display:flex;gap:4px}.gp{fill:var(--ac)}.gf{fill:var(--ac);opacity:.3}.gz{fill:var(--mu);opacity:.55}.gt{fill:var(--tx);font-size:11px}
+#gantt svg{width:100%;height:auto;display:block}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:7px 3px;border-bottom:1px solid var(--bd);font-size:14px}
+</style></head><body>
+<div class="tabs"><button id="t0">Players</button><button id="t1">Game</button><button id="t2">Plan</button></div>
+<main id="app"></main>
+<script>
+const $=s=>document.querySelector(s);
+let S={players:[],sel:[],T:60,F:5,K:1,R:1,G:null},tab=0,plan=null,run=false,el=0,last=0,tick=null,fired=0;
+try{const x=JSON.parse(localStorage.getItem('subs')||'null');if(x)S=Object.assign(S,x)}catch(e){}
+const save=()=>{try{localStorage.setItem('subs',JSON.stringify(S))}catch(e){}};
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt=m=>{const s=Math.round(m*60);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
+const nm=id=>{const p=S.players.find(p=>p.id===id);return p?esc(p.name):'?'};
+const cl=o=>JSON.parse(JSON.stringify(o));
+
+/* ---- planning engine ---- */
+function pick(arr,ft,K,dir){return arr.map((id,x)=>({id,x})).sort((a,b)=>{const df=ft[b.id]-ft[a.id];return(Math.abs(df)<1e-6?0:dir*df)||a.x-b.x}).slice(0,K).map(o=>o.id)}
+function adv(st,t){st.field.forEach(id=>st.ft[id]+=t-st.t);if(st.g)st.ft[st.g]+=t-st.t;st.t=t}
+function apply(st,e){st.field=st.field.filter(x=>!e.o.includes(x)).concat(e.i);st.bench=st.bench.filter(x=>!e.i.includes(x)).concat(e.o);st.cov=st.cov.filter(x=>!e.o.includes(x))}
+/* future swaps from state st: most-played leaves, least-played enters */
+function sim(st,P){const ev=[];let k=Math.floor(st.t/P.d+1e-9)+1;
+  while(k*P.d<P.T-1e-6){const t=k*P.d;adv(st,t);const fn=Math.max(0,Math.min(P.F-st.field.length,st.bench.length)),fi=pick(st.bench,st.ft,fn,-1),b2=st.bench.filter(x=>!fi.includes(x)),K=Math.min(P.K,st.field.length,b2.length),o=pick(st.field,st.ft,K,1),i=[...fi,...pick(b2,st.ft,K,-1)];
+    if(i.length||o.length){const e={t,o,i};ev.push(e);apply(st,e)}k++}
+  adv(st,P.T);return ev}
+function replan(){const c=cl(plan.base);plan.ev=sim(c,plan);plan.fin=c.ft}
+function build(){
+  const all=S.players.filter(p=>S.sel.includes(p.id)).map(p=>p.id),g=all.includes(S.G)?S.G:null,pr=all.filter(x=>x!==g),n=pr.length,T=S.T,F=S.F-(g?1:0),R=Math.max(1,Math.round(S.R)||1);let K=S.K;
+  if(n<2)return{err:'Select at least 2 present players (not counting the goalkeeper) in the Game tab.'};
+  if(!(T>0))return{err:'Enter the game length in minutes.'};
+  if(!(F>=1)||F>=n)return{err:`Outfield players on the field (${F}) must be at least 1 and fewer than outfield players present (${n}).`};
+  if(!(K>=1))return{err:'Changes at a time must be at least 1.'};
+  K=Math.min(K,F,n-F);const ft={};all.forEach(i=>ft[i]=0);
+  const P={all,g,pr,n,F,K,R,T,d:T*K/(n*R),hist:[],base:{t:0,field:pr.slice(0,F),bench:pr.slice(F),ft,inj:[],cov:[],g},start:g?[g,...pr.slice(0,F)]:pr.slice(0,F),fieldAvg:T*F/n,benchAvg:T*(n-F)/n};
+  return P}
+function ensure(){if(!plan){plan=build();if(!plan.err)replan()}}
+function stateAt(t){const st=cl(plan.base);for(const e of plan.ev){if(e.t>t+1e-9)break;adv(st,e.t);apply(st,e)}adv(st,Math.max(t,st.t));return st}
+const evAll=()=>plan.hist.concat(plan.ev);
+
+/* player actions during the game */
+function act(kind,id){
+  const past=plan.ev.filter(e=>e.t<=el+1e-9),st=stateAt(el),n=nm(id),e={t:el,o:[],i:[]};let note;
+  if(kind==='pause'){st.field=st.field.filter(x=>x!==id);st.cov=st.cov.filter(x=>x!==id);st.inj.push(id);e.o=[id];e.p=id;e.pon=true;note=`${n} paused`}
+  else if(kind==='play'){st.bench=st.bench.filter(x=>x!==id);st.field.push(id);st.cov.push(id);e.i=[id];note=`${n} on the field (timer started)`}
+  else if(kind==='resume'){st.inj=st.inj.filter(x=>x!==id);e.p=id;e.pon=false;
+    if(st.field.length<plan.F){st.field.push(id);e.i=[id];note=`${n} resumes on the field`}
+    else if(st.cov.length){const c=st.cov[st.cov.length-1];st.cov=st.cov.filter(x=>x!==c);st.field=st.field.filter(x=>x!==c).concat(id);st.bench.push(c);e.o=[c];e.i=[id];note=`${n} resumes, ${nm(c)} back to the bench`}
+    else{st.bench.push(id);note=`${n} resumes (on the bench)`}}
+  else if(kind==='gk'){const old=st.g;e.gc=[old,id];st.cov=st.cov.filter(x=>x!==id);
+    if(st.field.includes(id)){st.field=st.field.map(x=>x===id?old:x);e.gcb=false;note=`${n} is now goalkeeper, ${nm(old)} takes the field spot`}
+    else{st.bench=st.bench.filter(x=>x!==id).concat(old);e.gcb=true;note=`${n} is now goalkeeper, ${nm(old)} to the bench`}
+    st.g=id}
+  e.note=note;plan.hist.push(...past,e);plan.base=st;replan();render();
+}
+
+/* ---- UI ---- */
+function render(){
+  document.querySelectorAll('.tabs button').forEach((b,i)=>b.className=i===tab?'on':'');
+  const a=$('#app');
+  if(tab===0){
+    a.innerHTML=`<div class="card"><h2>All players</h2><div class="row"><input type="text" id="np" placeholder="Player name"><button class="btn" style="flex:0" id="add">Add</button></div>
+    <div style="margin-top:8px">${S.players.map(p=>`<div class="pl"><span>${esc(p.name)}</span><button class="btn x" data-d="${p.id}">Delete</button></div>`).join('')||'<p class="mu">No players yet.</p>'}</div></div>`;
+    const add=()=>{const v=$('#np').value.trim();if(v){S.players.push({id:Date.now()+Math.random(),name:v});save();render();$('#np').focus()}};
+    $('#add').onclick=add;$('#np').onkeydown=e=>{if(e.key==='Enter')add()};
+    a.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{const id=+b.dataset.d;S.players=S.players.filter(p=>p.id!==id);S.sel=S.sel.filter(x=>x!==id);save();render()});
+  }else if(tab===1){
+    a.innerHTML=`<div class="card"><h2>Who is present?</h2>${S.players.map(p=>`<label class="pl" style="margin:0;color:var(--tx);font-size:17px"><input type="checkbox" data-s="${p.id}" ${S.sel.includes(p.id)?'checked':''}><span>${esc(p.name)}</span></label>`).join('')||'<p class="mu">Add players first.</p>'}
+    <p class="mu">${S.sel.length} present</p></div>
+    <div class="card"><h2>Settings</h2>
+    <label>Goalkeeper (never substituted)</label><select id="G" style="width:100%;padding:12px;font-size:17px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx)"><option value="">No goalkeeper</option>${S.players.filter(p=>S.sel.includes(p.id)).map(p=>`<option value="${p.id}" ${S.G===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
+    <label>Game length (minutes)</label><input type="number" inputmode="decimal" id="T" value="${S.T}">
+    <label>Players on the field at once (including goalkeeper)</label><input type="number" inputmode="numeric" id="F" value="${S.F}">
+    <label>Players changed at a time</label><input type="number" inputmode="numeric" id="K" value="${S.K}">
+    <label>Substitution rounds (times each player sits on the bench)</label><input type="number" inputmode="numeric" id="R" value="${S.R}">
+    <button class="btn" style="width:100%;margin-top:14px" id="go">Calculate plan (restarts the game)</button></div>`;
+    a.querySelectorAll('[data-s]').forEach(c=>c.onchange=()=>{const id=+c.dataset.s;S.sel=c.checked?[...S.sel,id]:S.sel.filter(x=>x!==id);save();render()});
+    ['T','F','K','R'].forEach(k=>$('#'+k).oninput=e=>{S[k]=parseFloat(e.target.value);save()});$('#G').onchange=e=>{S.G=e.target.value?+e.target.value:null;save()};
+    $('#go').onclick=()=>{newGame();tab=2;render()};
+  }else{
+    ensure();
+    if(plan.err){a.innerHTML=`<div class="card err">${plan.err}</div>`;return}
+    const P=plan,inj=P.base.inj;
+    a.innerHTML=`<div class="card"><h2>Overview</h2>
+    <p>${P.all.length} players, ${S.F} on the field.${P.g?` Starting goalkeeper: <b>${nm(P.g)}</b> (can be changed during the game).`:''} Planned: every ${P.g?'other ':''}player plays about <b>${fmt(P.fieldAvg)}</b> and sits out about <b>${fmt(P.benchAvg)}</b>, in <b>${P.R}</b> bench round${P.R>1?'s':''}.</p>
+    <p>Swap <b>${P.K}</b> player${P.K>1?'s':''} every <b>${fmt(P.d)}</b> min.${P.K!==S.K?` <span class="err">Changes reduced from ${S.K} to ${P.K} (max possible).</span>`:''}</p>
+    <p class="mu">Start: ${P.start.map(x=>nm(x)+(x===P.g?' (GK)':'')).join(', ')}</p></div>
+    <div class="card"><div class="big" id="clk"></div><div class="mu" style="text-align:center" id="nx"></div><div class="err" style="text-align:center" id="warn"></div>
+    <div class="row" style="margin-top:10px"><button class="btn" id="pl">${run?'Pause':'Start'}</button><button class="btn s" id="rs">Reset</button></div></div>
+    <div class="card"><h2>Timeline</h2><div id="gantt"></div><p class="mu">Solid green = time played, light green = planned, grey = paused, red line = now.</p></div>
+    <div class="card"><h2>Players</h2><table><tr><th>Player</th><th>Now</th><th>Played</th><th>End</th><th></th></tr>${P.all.map(id=>`<tr><td>${nm(id)}</td><td id="s${id}"></td><td id="p${id}"></td><td>${fmt(P.fin[id])}</td><td id="a${id}"></td></tr>`).join('')}</table>
+    <p class="mu">"End" is the expected field time at the final whistle. <b>Pause</b>: a player on the field is out for any reason. <b>Play</b>: puts a bench player on the field and starts his timer, for example to cover a paused player. <b>Resume</b>: a paused player returns, and a covering player goes back to the bench. <b>GK</b>: makes this player the goalkeeper; the current goalkeeper takes his place. The plan is recalculated after every action.</p></div>
+    <div class="card"><h2>Substitutions</h2>${evAll().map(e=>`<div class="ev"><b>${fmt(e.t)}</b>${e.note?` ⏸ ${e.note}`:''}${e.o.length?`<br><span class="out">Out:</span> ${e.o.map(nm).join(', ')}`:''}${e.i.length?`<br><span class="in">In:</span> ${e.i.map(nm).join(', ')}`:''}</div>`).join('')||'<p class="mu">No swaps needed.</p>'}</div>`;
+    $('#pl').onclick=()=>{run=!run;if(run){last=Date.now();tick=setInterval(upd,250)}else stop();$('#pl').textContent=run?'Pause':'Start'};
+    $('#rs').onclick=()=>{newGame();render()};
+    upd();
+  }
+}
+function newGame(){run=false;stop();el=0;fired=0;plan=null;ensure()}
+function stop(){clearInterval(tick);tick=null}
+function upd(){
+  if(!plan||plan.err||!$('#clk'))return;
+  if(run){const n=Date.now();el+=(n-last)/60000;last=n}
+  const T=plan.T;if(el>=T){el=T;run=false;stop();$('#pl').textContent='Start'}
+  $('#clk').textContent=fmt(el);
+  const all=evAll(),idx=all.findIndex(e=>e.t>el+1e-9);
+  $('#nx').textContent=el>=T?'Game over':idx<0?'No more swaps':`Next swap in ${fmt(all[idx].t-el)}`;
+  document.querySelectorAll('.ev').forEach((d,i)=>d.className='ev'+(i===idx?' next':i<(idx<0?99:idx)?' done':''));
+  const cur=stateAt(el),full=cur.field.length>=plan.F;
+  plan.all.forEach(id=>{const s=document.getElementById('s'+id),p=document.getElementById('p'+id),a=document.getElementById('a'+id);if(!s)return;
+    const st=id===cur.g?'GK':cur.inj.includes(id)?'Paused':cur.cov.includes(id)?'Cover':cur.field.includes(id)?'Field':'Bench';
+    s.textContent=st;s.style.color=st==='Paused'?'var(--bad)':st==='Bench'?'':'var(--ac)';p.textContent=fmt(cur.ft[id]);
+    const key=st+(st==='Bench'&&full?'x':'');
+    if(a.dataset.k!==key){a.dataset.k=key;const b=(l,c,pr)=>`<button class="btn${pr?'':' s'} sm" data-act="${c}" data-id="${id}">${l}</button>`,gk=b('GK','gk');
+      a.innerHTML='<div class="ac">'+(st==='GK'?'':st==='Paused'?b('Resume','resume',1):st==='Bench'?(full?'<button class="btn sm" disabled>Play</button>':b('Play','play',1))+gk:b('Pause','pause')+gk)+'</div>'}});
+  $('#warn').textContent=el<plan.T&&cur.field.length<plan.F?`Only ${cur.field.length} of ${plan.F} outfield spots filled. Tap Play on a bench player.`:'';
+  gantt();const due=all.filter(e=>!e.note&&e.t<=el+1e-9).length;
+  if(run&&due>fired){try{navigator.vibrate&&navigator.vibrate([300,150,300])}catch(e){}}
+  fired=Math.max(fired,due);
+}
+function gantt(){const g=$('#gantt');if(!g||!plan||plan.err)return;
+  const P=plan,T=P.T,W=360,L=66,Rm=8,rh=22,H=P.all.length*rh+26,x=t=>L+(W-L-Rm)*t/T,op={},seg={},ps={},pz={};
+  P.all.forEach(i=>{seg[i]=[];pz[i]=[]});P.start.forEach(i=>op[i]=0);
+  evAll().forEach(e=>{if(e.gc&&e.gcb){const[a,b]=e.gc;if(op[a]!==undefined){seg[a].push([op[a],e.t]);delete op[a]}op[b]=e.t}e.o.forEach(i=>{if(op[i]!==undefined){seg[i].push([op[i],e.t]);delete op[i]}});e.i.forEach(i=>op[i]=e.t);
+    if(e.p!==undefined){if(e.pon)ps[e.p]=e.t;else if(ps[e.p]!==undefined){pz[e.p].push([ps[e.p],e.t]);delete ps[e.p]}}});
+  Object.keys(op).forEach(i=>seg[i].push([op[i],T]));Object.keys(ps).forEach(i=>pz[i].push([ps[i],el]));
+  const rect=(a,b,c,y)=>b>a+1e-6?`<rect class="${c}" x="${x(a)}" y="${y}" width="${x(b)-x(a)}" height="${rh-8}" rx="2"/>`:'';
+  let s=`<svg viewBox="0 0 ${W} ${H}">`;const step=[1,2,5,10,15,20,30,45].find(v=>T/v<=8)||60;
+  for(let t=0;t<=T+1e-6;t+=step)s+=`<line x1="${x(t)}" x2="${x(t)}" y1="0" y2="${H-18}" stroke="var(--bd)"/><text class="gt" x="${x(t)}" y="${H-5}" text-anchor="middle">${t}'</text>`;
+  P.all.forEach((id,r)=>{const y=r*rh+4,p=S.players.find(p=>p.id===id),n=p?p.name.slice(0,10):'?';
+    s+=`<text class="gt" x="2" y="${y+rh/2+1}">${esc(n)}</text>`;
+    seg[id].forEach(([a,b])=>{s+=rect(a,Math.min(b,el),'gp',y)+rect(Math.max(a,el),b,'gf',y)});
+    pz[id].forEach(([a,b])=>{s+=rect(a,b,'gz',y)})});
+  s+=`<line x1="${x(el)}" x2="${x(el)}" y1="0" y2="${H-18}" stroke="var(--bad)" stroke-width="2"/></svg>`;g.innerHTML=s}
+document.querySelectorAll('.tabs button').forEach((b,i)=>b.onclick=()=>{tab=i;render()});
+$('#app').onclick=e=>{const b=e.target.closest('[data-act]');if(b)act(b.dataset.act,parseFloat(b.dataset.id))};
+render();
+</script></body></html>
