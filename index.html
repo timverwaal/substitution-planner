@@ -33,8 +33,9 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:7px 3px;
 <main id="app"></main>
 <script>
 const $=s=>document.querySelector(s);
-let S={players:[],sel:[],T:60,F:5,K:1,R:1,G:null},tab=0,plan=null,run=false,el=0,last=0,tick=null,fired=0;
+let S={players:[],sel:[],bs:[],T:60,F:5,K:1,R:1,G:null},tab=0,plan=null,run=false,el=0,last=0,tick=null,fired=0;
 try{const x=JSON.parse(localStorage.getItem('subs')||'null');if(x)S=Object.assign(S,x)}catch(e){}
+S.bs=S.bs||[];
 const save=()=>{try{localStorage.setItem('subs',JSON.stringify(S))}catch(e){}};
 const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmt=m=>{const s=Math.round(m*60);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
@@ -52,13 +53,15 @@ function sim(st,P){const ev=[];let k=Math.floor(st.t/P.d+1e-9)+1;
   adv(st,P.T);return ev}
 function replan(){const c=cl(plan.base);plan.ev=sim(c,plan);plan.fin=c.ft}
 function build(){
-  const all=S.players.filter(p=>S.sel.includes(p.id)).map(p=>p.id),g=all.includes(S.G)?S.G:null,pr=all.filter(x=>x!==g),n=pr.length,T=S.T,F=S.F-(g?1:0),R=Math.max(1,Math.round(S.R)||1);let K=S.K;
+  const all=S.players.filter(p=>S.sel.includes(p.id)).map(p=>p.id),g=all.includes(S.G)?S.G:null,pr0=all.filter(x=>x!==g),n=pr0.length,T=S.T,F=S.F-(g?1:0),R=Math.max(1,Math.round(S.R)||1);let K=S.K;
+  const bs=S.bs.filter(x=>pr0.includes(x)),pr=[...pr0.filter(x=>!bs.includes(x)),...bs];
   if(n<2)return{err:'Select at least 2 present players (not counting the goalkeeper) in the Game tab.'};
   if(!(T>0))return{err:'Enter the game length in minutes.'};
   if(!(F>=1)||F>=n)return{err:`Outfield players on the field (${F}) must be at least 1 and fewer than outfield players present (${n}).`};
+  if(pr0.length-bs.length<F)return{err:`Only ${pr0.length-bs.length} outfield players are not starting on the bench, but ${F} are needed on the field.`};
   if(!(K>=1))return{err:'Changes at a time must be at least 1.'};
   K=Math.min(K,F,n-F);const ft={};all.forEach(i=>ft[i]=0);
-  const P={all,g,pr,n,F,K,R,T,d:T*K/(n*R),hist:[],base:{t:0,field:pr.slice(0,F),bench:pr.slice(F),ft,inj:[],cov:[],g},start:g?[g,...pr.slice(0,F)]:pr.slice(0,F),fieldAvg:T*F/n,benchAvg:T*(n-F)/n};
+  const P={all,g,pr,bs,n,F,K,R,T,d:T*K/(n*R),hist:[],base:{t:0,field:pr.slice(0,F),bench:pr.slice(F),ft,inj:[],cov:[],g},start:g?[g,...pr.slice(0,F)]:pr.slice(0,F),fieldAvg:T*F/n,benchAvg:T*(n-F)/n};
   return P}
 function ensure(){if(!plan){plan=build();if(!plan.err)replan()}}
 function stateAt(t){const st=cl(plan.base);for(const e of plan.ev){if(e.t>t+1e-9)break;adv(st,e.t);apply(st,e)}adv(st,Math.max(t,st.t));return st}
@@ -91,7 +94,7 @@ function render(){
     $('#add').onclick=add;$('#np').onkeydown=e=>{if(e.key==='Enter')add()};
     a.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{const id=+b.dataset.d;S.players=S.players.filter(p=>p.id!==id);S.sel=S.sel.filter(x=>x!==id);save();render()});
   }else if(tab===1){
-    a.innerHTML=`<div class="card"><h2>Who is present?</h2>${S.players.map(p=>`<label class="pl" style="margin:0;color:var(--tx);font-size:17px"><input type="checkbox" data-s="${p.id}" ${S.sel.includes(p.id)?'checked':''}><span>${esc(p.name)}</span></label>`).join('')||'<p class="mu">Add players first.</p>'}
+    a.innerHTML=`<div class="card"><h2>Who is present?</h2>${S.players.map(p=>`<div class="pl" style="font-size:17px"><input type="checkbox" data-s="${p.id}" ${S.sel.includes(p.id)?'checked':''}><span>${esc(p.name)}</span>${S.sel.includes(p.id)?`<label class="mu" style="margin:0;display:flex;gap:4px;align-items:center;font-size:13px"><input type="checkbox" data-b="${p.id}" ${S.bs.includes(p.id)?'checked':''}>Starts on bench</label>`:''}</div>`).join('')||'<p class="mu">Add players first.</p>'}
     <p class="mu">${S.sel.length} present</p></div>
     <div class="card"><h2>Settings</h2>
     <label>Goalkeeper (never substituted)</label><select id="G" style="width:100%;padding:12px;font-size:17px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx)"><option value="">No goalkeeper</option>${S.players.filter(p=>S.sel.includes(p.id)).map(p=>`<option value="${p.id}" ${S.G===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
@@ -100,7 +103,8 @@ function render(){
     <label>Players changed at a time</label><input type="number" inputmode="numeric" id="K" value="${S.K}">
     <label>Substitution rounds (times each player sits on the bench)</label><input type="number" inputmode="numeric" id="R" value="${S.R}">
     <button class="btn" style="width:100%;margin-top:14px" id="go">Calculate plan (restarts the game)</button></div>`;
-    a.querySelectorAll('[data-s]').forEach(c=>c.onchange=()=>{const id=+c.dataset.s;S.sel=c.checked?[...S.sel,id]:S.sel.filter(x=>x!==id);save();render()});
+    a.querySelectorAll('[data-s]').forEach(c=>c.onchange=()=>{const id=+c.dataset.s;S.sel=c.checked?[...S.sel,id]:S.sel.filter(x=>x!==id);if(!c.checked)S.bs=S.bs.filter(x=>x!==id);save();render()});
+    a.querySelectorAll('[data-b]').forEach(c=>c.onchange=()=>{const id=+c.dataset.b;S.bs=c.checked?[...S.bs,id]:S.bs.filter(x=>x!==id);save();render()});
     ['T','F','K','R'].forEach(k=>$('#'+k).oninput=e=>{S[k]=parseFloat(e.target.value);save()});$('#G').onchange=e=>{S.G=e.target.value?+e.target.value:null;save()};
     $('#go').onclick=()=>{newGame();tab=2;render()};
   }else{
@@ -110,7 +114,7 @@ function render(){
     a.innerHTML=`<div class="card"><h2>Overview</h2>
     <p>${P.all.length} players, ${S.F} on the field.${P.g?` Starting goalkeeper: <b>${nm(P.g)}</b> (can be changed during the game).`:''} Planned: every ${P.g?'other ':''}player plays about <b>${fmt(P.fieldAvg)}</b> and sits out about <b>${fmt(P.benchAvg)}</b>, in <b>${P.R}</b> bench round${P.R>1?'s':''}.</p>
     <p>Swap <b>${P.K}</b> player${P.K>1?'s':''} every <b>${fmt(P.d)}</b> min.${P.K!==S.K?` <span class="err">Changes reduced from ${S.K} to ${P.K} (max possible).</span>`:''}</p>
-    <p class="mu">Start: ${P.start.map(x=>nm(x)+(x===P.g?' (GK)':'')).join(', ')}</p></div>
+    <p class="mu">Start: ${P.start.map(x=>nm(x)+(x===P.g?' (GK)':'')).join(', ')}</p>${P.bs.length?`<p class="mu">Starts on bench: ${P.bs.map(nm).join(', ')}</p>`:''}</div>
     <div class="card"><div class="big" id="clk"></div><div class="mu" style="text-align:center" id="nx"></div><div class="err" style="text-align:center" id="warn"></div>
     <div class="row" style="margin-top:10px"><button class="btn" id="pl">${run?'Pause':'Start'}</button><button class="btn s" id="rs">Reset</button></div></div>
     <div class="card"><h2>Timeline</h2><div id="gantt"></div><p class="mu">Solid green = time played, light green = planned, grey = paused, red line = now.</p></div>
