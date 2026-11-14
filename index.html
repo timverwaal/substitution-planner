@@ -44,14 +44,14 @@ const cl=o=>JSON.parse(JSON.stringify(o));
 
 /* ---- planning engine ---- */
 function pick(arr,ft,K,dir){return arr.map((id,x)=>({id,x})).sort((a,b)=>{const df=ft[b.id]-ft[a.id];return(Math.abs(df)<1e-6?0:dir*df)||a.x-b.x}).slice(0,K).map(o=>o.id)}
-function adv(st,t){st.field.forEach(id=>st.ft[id]+=t-st.t);if(st.g)st.ft[st.g]+=t-st.t;st.t=t}
+function adv(st,t){st.field.forEach(id=>st.ft[id]+=t-st.t);st.bench.forEach(id=>st.bt[id]=(st.bt[id]||0)+t-st.t);if(st.g)st.ft[st.g]+=t-st.t;st.t=t}
 function apply(st,e){st.field=st.field.filter(x=>!e.o.includes(x)).concat(e.i);st.bench=st.bench.filter(x=>!e.i.includes(x)).concat(e.o);st.cov=st.cov.filter(x=>!e.o.includes(x))}
 /* future swaps from state st: most-played leaves, least-played enters */
 function sim(st,P){const ev=[];let k=Math.floor(st.t/P.d+1e-9)+1;
   while(k*P.d<P.T-1e-6){const t=k*P.d;adv(st,t);const fn=Math.max(0,Math.min(P.F-st.field.length,st.bench.length)),fi=pick(st.bench,st.ft,fn,-1),b2=st.bench.filter(x=>!fi.includes(x)),K=Math.min(P.K,st.field.length,b2.length),o=pick(st.field,st.ft,K,1),i=[...fi,...pick(b2,st.ft,K,-1)];
     if(i.length||o.length){const e={t,o,i};ev.push(e);apply(st,e)}k++}
   adv(st,P.T);return ev}
-function replan(){const c=cl(plan.base);plan.ev=sim(c,plan);plan.fin=c.ft}
+function replan(){const c=cl(plan.base);plan.ev=sim(c,plan);plan.fin=c.ft;plan.finb=c.bt}
 function build(){
   const all=S.players.filter(p=>S.sel.includes(p.id)).map(p=>p.id),g=all.includes(S.G)?S.G:null,pr0=all.filter(x=>x!==g),n=pr0.length,T=S.T,F=S.F-(g?1:0),R=Math.max(1,Math.round(S.R)||1);let K=S.K;
   const bs=S.bs.filter(x=>pr0.includes(x)),pr=[...pr0.filter(x=>!bs.includes(x)),...bs];
@@ -60,8 +60,8 @@ function build(){
   if(!(F>=1)||F>=n)return{err:`Outfield players on the field (${F}) must be at least 1 and fewer than outfield players present (${n}).`};
   if(pr0.length-bs.length<F)return{err:`Only ${pr0.length-bs.length} outfield players are not starting on the bench, but ${F} are needed on the field.`};
   if(!(K>=1))return{err:'Changes at a time must be at least 1.'};
-  K=Math.min(K,F,n-F);const ft={};all.forEach(i=>ft[i]=0);
-  const P={all,g,pr,bs,n,F,K,R,T,d:T*K/(n*R),hist:[],base:{t:0,field:pr.slice(0,F),bench:pr.slice(F),ft,inj:[],cov:[],g},start:g?[g,...pr.slice(0,F)]:pr.slice(0,F),fieldAvg:T*F/n,benchAvg:T*(n-F)/n};
+  K=Math.min(K,F,n-F);const ft={},bt={};all.forEach(i=>{ft[i]=0;bt[i]=0});
+  const P={all,g,pr,bs,n,F,K,R,T,d:T*K/(n*R),hist:[],base:{t:0,field:pr.slice(0,F),bench:pr.slice(F),ft,bt,inj:[],cov:[],g},start:g?[g,...pr.slice(0,F)]:pr.slice(0,F),fieldAvg:T*F/n,benchAvg:T*(n-F)/n};
   return P}
 function ensure(){if(!plan){plan=build();if(!plan.err)replan()}}
 function stateAt(t){const st=cl(plan.base);for(const e of plan.ev){if(e.t>t+1e-9)break;adv(st,e.t);apply(st,e)}adv(st,Math.max(t,st.t));return st}
@@ -77,6 +77,7 @@ function act(kind,id){
     if(st.field.length<plan.F){st.field.push(id);e.i=[id];note=`${n} resumes on the field`}
     else if(st.cov.length){const c=st.cov[st.cov.length-1];st.cov=st.cov.filter(x=>x!==c);st.field=st.field.filter(x=>x!==c).concat(id);st.bench.push(c);e.o=[c];e.i=[id];note=`${n} resumes, ${nm(c)} back to the bench`}
     else{st.bench.push(id);note=`${n} resumes (on the bench)`}}
+  else if(kind==='bench'){st.field=st.field.filter(x=>x!==id);st.cov=st.cov.filter(x=>x!==id);if(!st.bench.includes(id))st.bench.push(id);e.o=[id];note=`${n} to the bench (manual)`}
   else if(kind==='gk'){const old=st.g;e.gc=[old,id];st.cov=st.cov.filter(x=>x!==id);
     if(st.field.includes(id)){st.field=st.field.map(x=>x===id?old:x);e.gcb=false;note=`${n} is now goalkeeper, ${nm(old)} takes the field spot`}
     else{st.bench=st.bench.filter(x=>x!==id).concat(old);e.gcb=true;note=`${n} is now goalkeeper, ${nm(old)} to the bench`}
@@ -125,7 +126,8 @@ function render(){
     <div class="card"><div class="big" id="clk"></div><div class="mu" style="text-align:center" id="nx"></div><div class="err" style="text-align:center" id="warn"></div>
     <div class="row" style="margin-top:10px"><button class="btn" id="pl">${run?'Pause':'Start'}</button><button class="btn s" id="rs">Reset</button></div></div>
     <div class="card"><h2>Timeline</h2><div id="gantt"></div><p class="mu">Solid green = time played, light green = planned, grey = paused, red line = now.</p></div>
-    <div class="card"><h2>Players</h2><table><tr><th>Player</th><th>Now</th><th>Played</th><th>End</th><th></th></tr>${P.all.map(id=>`<tr><td>${nm(id)}</td><td id="s${id}"></td><td id="p${id}"></td><td>${fmt(P.fin[id])}</td><td id="a${id}"></td></tr>`).join('')}</table>
+    <div class="card"><h2>Bench time</h2><p class="mu">Most time on the bench first.</p><div id="rank"></div></div>
+    <div class="card"><h2>Players</h2><table><tr><th>Player</th><th>Now</th><th>Played</th><th>Bench</th><th></th></tr>${P.all.map(id=>`<tr><td>${nm(id)}</td><td id="s${id}"></td><td id="p${id}"></td><td id="b${id}"></td><td id="a${id}"></td></tr>`).join('')}</table>
     <p class="mu">"End" is the expected field time at the final whistle. <b>Pause</b>: a player on the field is out for any reason. <b>Play</b>: puts a bench player on the field and starts his timer, for example to cover a paused player. <b>Resume</b>: a paused player returns, and a covering player goes back to the bench. <b>GK</b>: makes this player the goalkeeper; the current goalkeeper takes his place. The plan is recalculated after every action.</p></div>
     <div class="card"><h2>Substitutions</h2>${evAll().map(e=>`<div class="ev"><b>${fmt(e.t)}</b>${e.note?` ⏸ ${e.note}`:''}${e.o.length?`<br><span class="out">Out:</span> ${e.o.map(nm).join(', ')}`:''}${e.i.length?`<br><span class="in">In:</span> ${e.i.map(nm).join(', ')}`:''}</div>`).join('')||'<p class="mu">No swaps needed.</p>'}</div>`;
     $('#pl').onclick=()=>{sync();if(!run){setTm({run:true,start:Date.now()});startTick()}else{setTm({run:false,base:elapsed()});stop()}sync();$('#pl').textContent=run?'Pause':'Start';upd()};
@@ -146,10 +148,11 @@ function upd(){
   const cur=stateAt(el),full=cur.field.length>=plan.F;
   plan.all.forEach(id=>{const s=document.getElementById('s'+id),p=document.getElementById('p'+id),a=document.getElementById('a'+id);if(!s)return;
     const st=id===cur.g?'GK':cur.inj.includes(id)?'Paused':cur.cov.includes(id)?'Cover':cur.field.includes(id)?'Field':'Bench';
-    s.textContent=st;s.style.color=st==='Paused'?'var(--bad)':st==='Bench'?'':'var(--ac)';p.textContent=fmt(cur.ft[id]);
+    s.textContent=st;s.style.color=st==='Paused'?'var(--bad)':st==='Bench'?'':'var(--ac)';p.textContent=fmt(cur.ft[id]);document.getElementById('b'+id).textContent=fmt(cur.bt[id]);
     const key=st+(st==='Bench'&&full?'x':'');
     if(a.dataset.k!==key){a.dataset.k=key;const b=(l,c,pr)=>`<button class="btn${pr?'':' s'} sm" data-act="${c}" data-id="${id}">${l}</button>`,gk=b('GK','gk');
-      a.innerHTML='<div class="ac">'+(st==='GK'?'':st==='Paused'?b('Resume','resume',1):st==='Bench'?(full?'<button class="btn sm" disabled>Play</button>':b('Play','play',1))+gk:b('Pause','pause')+gk)+'</div>'}});
+      a.innerHTML='<div class="ac">'+(st==='GK'?'':st==='Paused'?b('Resume','resume',1):st==='Bench'?(full?'<button class="btn sm" disabled>Play</button>':b('Play','play',1))+gk:b('Pause','pause')+b('Bench','bench')+gk)+'</div>'}});
+  $('#rank').innerHTML=plan.all.filter(id=>id!==plan.g).sort((a,b)=>cur.bt[b]-cur.bt[a]).map((id,i)=>`<div class="pl"><span>${i+1}. ${nm(id)}</span><b>${fmt(cur.bt[id])}</b></div>`).join('')||'<p class="mu">No players.</p>';
   $('#warn').textContent=el<plan.T&&cur.field.length<plan.F?`Only ${cur.field.length} of ${plan.F} outfield spots filled. Tap Play on a bench player.`:'';
   gantt();const due=all.filter(e=>!e.note&&e.t<=el+1e-9).length;
   if(run&&due>fired){try{navigator.vibrate&&navigator.vibrate([300,150,300])}catch(e){}}
