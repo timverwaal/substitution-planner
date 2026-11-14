@@ -45,7 +45,7 @@ const cl=o=>JSON.parse(JSON.stringify(o));
 /* ---- planning engine ---- */
 function pick(arr,ft,K,dir){return arr.map((id,x)=>({id,x})).sort((a,b)=>{const df=ft[b.id]-ft[a.id];return(Math.abs(df)<1e-6?0:dir*df)||a.x-b.x}).slice(0,K).map(o=>o.id)}
 function adv(st,t){st.field.forEach(id=>st.ft[id]+=t-st.t);st.bench.forEach(id=>st.bt[id]=(st.bt[id]||0)+t-st.t);if(st.g)st.ft[st.g]+=t-st.t;st.t=t}
-function apply(st,e){st.field=st.field.filter(x=>!e.o.includes(x)).concat(e.i);st.bench=st.bench.filter(x=>!e.i.includes(x)).concat(e.o);st.cov=st.cov.filter(x=>!e.o.includes(x))}
+function apply(st,e){st.field=st.field.filter(x=>!e.o.includes(x)).concat(e.i);st.bench=st.bench.filter(x=>!e.i.includes(x)).concat(e.o)}
 /* future swaps from state st: most-played leaves, least-played enters */
 function sim(st,P){const ev=[];let k=Math.floor(st.t/P.d+1e-9)+1;
   while(k*P.d<P.T-1e-6){const t=k*P.d;adv(st,t);const fn=Math.max(0,Math.min(P.F-st.field.length,st.bench.length)),fi=pick(st.bench,st.ft,fn,-1),b2=st.bench.filter(x=>!fi.includes(x)),K=Math.min(P.K,st.field.length,b2.length),o=pick(st.field,st.ft,K,1),i=[...fi,...pick(b2,st.ft,K,-1)];
@@ -61,7 +61,7 @@ function build(){
   if(pr0.length-bs.length<F)return{err:`Only ${pr0.length-bs.length} outfield players are not starting on the bench, but ${F} are needed on the field.`};
   if(!(K>=1))return{err:'Changes at a time must be at least 1.'};
   K=Math.min(K,F,n-F);const ft={},bt={};all.forEach(i=>{ft[i]=0;bt[i]=0});
-  const P={all,g,pr,bs,n,F,K,R,T,d:T*K/(n*R),hist:[],base:{t:0,field:pr.slice(0,F),bench:pr.slice(F),ft,bt,inj:[],cov:[],g},start:g?[g,...pr.slice(0,F)]:pr.slice(0,F),fieldAvg:T*F/n,benchAvg:T*(n-F)/n};
+  const P={all,g,pr,bs,n,F,K,R,T,d:T*K/(n*R),hist:[],base:{t:0,field:pr.slice(0,F),bench:pr.slice(F),ft,bt,inj:[],g},start:g?[g,...pr.slice(0,F)]:pr.slice(0,F),fieldAvg:T*F/n,benchAvg:T*(n-F)/n};
   return P}
 function ensure(){if(!plan){plan=build();if(!plan.err)replan()}}
 function stateAt(t){const st=cl(plan.base);for(const e of plan.ev){if(e.t>t+1e-9)break;adv(st,e.t);apply(st,e)}adv(st,Math.max(t,st.t));return st}
@@ -71,17 +71,11 @@ const evAll=()=>plan.hist.concat(plan.ev);
 function act(kind,id){
   sync();
   const past=plan.ev.filter(e=>e.t<=el+1e-9),st=stateAt(el),n=nm(id),e={t:el,o:[],i:[]};let note;
-  if(kind==='pause'){st.field=st.field.filter(x=>x!==id);st.cov=st.cov.filter(x=>x!==id);st.inj.push(id);e.o=[id];e.p=id;e.pon=true;note=`${n} paused`}
-  else if(kind==='play'){st.bench=st.bench.filter(x=>x!==id);st.field.push(id);st.cov.push(id);e.i=[id];note=`${n} on the field (timer started)`}
+  if(kind==='pause'){st.field=st.field.filter(x=>x!==id);st.inj.push(id);e.o=[id];e.p=id;e.pon=true;note=`${n} paused`}
   else if(kind==='resume'){st.inj=st.inj.filter(x=>x!==id);e.p=id;e.pon=false;
     if(st.field.length<plan.F){st.field.push(id);e.i=[id];note=`${n} resumes on the field`}
-    else if(st.cov.length){const c=st.cov[st.cov.length-1];st.cov=st.cov.filter(x=>x!==c);st.field=st.field.filter(x=>x!==c).concat(id);st.bench.push(c);e.o=[c];e.i=[id];note=`${n} resumes, ${nm(c)} back to the bench`}
     else{st.bench.push(id);note=`${n} resumes (on the bench)`}}
-  else if(kind==='bench'){st.field=st.field.filter(x=>x!==id);st.cov=st.cov.filter(x=>x!==id);if(!st.bench.includes(id))st.bench.push(id);e.o=[id];note=`${n} to the bench (manual)`}
-  else if(kind==='gk'){const old=st.g;e.gc=[old,id];st.cov=st.cov.filter(x=>x!==id);
-    if(st.field.includes(id)){st.field=st.field.map(x=>x===id?old:x);e.gcb=false;note=`${n} is now goalkeeper, ${nm(old)} takes the field spot`}
-    else{st.bench=st.bench.filter(x=>x!==id).concat(old);e.gcb=true;note=`${n} is now goalkeeper, ${nm(old)} to the bench`}
-    st.g=id}
+  else if(kind==='bench'){st.field=st.field.filter(x=>x!==id);if(!st.bench.includes(id))st.bench.push(id);e.o=[id];note=`${n} to the bench (manual)`}
   e.note=note;plan.hist.push(...past,e);plan.base=st;replan();render();
 }
 
@@ -120,7 +114,7 @@ function render(){
     if(plan.err){a.innerHTML=`<div class="card err">${plan.err}</div>`;return}
     const P=plan,inj=P.base.inj;
     a.innerHTML=`<div class="card"><h2>Overview</h2>
-    <p>${P.all.length} players, ${S.F} on the field.${P.g?` Starting goalkeeper: <b>${nm(P.g)}</b> (can be changed during the game).`:''} Planned: every ${P.g?'other ':''}player plays about <b>${fmt(P.fieldAvg)}</b> and sits out about <b>${fmt(P.benchAvg)}</b>, in <b>${P.R}</b> bench round${P.R>1?'s':''}.</p>
+    <p>${P.all.length} players, ${S.F} on the field.${P.g?` Starting goalkeeper: <b>${nm(P.g)}</b>`:''} Planned: every ${P.g?'other ':''}player plays about <b>${fmt(P.fieldAvg)}</b> and sits out about <b>${fmt(P.benchAvg)}</b>, in <b>${P.R}</b> bench round${P.R>1?'s':''}.</p>
     <p>Swap <b>${P.K}</b> player${P.K>1?'s':''} every <b>${fmt(P.d)}</b> min.${P.K!==S.K?` <span class="err">Changes reduced from ${S.K} to ${P.K} (max possible).</span>`:''}</p>
     <p class="mu">Start: ${P.start.map(x=>nm(x)+(x===P.g?' (GK)':'')).join(', ')}</p>${P.bs.length?`<p class="mu">Starts on bench: ${P.bs.map(nm).join(', ')}</p>`:''}</div>
     <div class="card"><div class="big" id="clk"></div><div class="mu" style="text-align:center" id="nx"></div><div class="err" style="text-align:center" id="warn"></div>
@@ -128,7 +122,7 @@ function render(){
     <div class="card"><h2>Timeline</h2><div id="gantt"></div><p class="mu">Solid green = time played, light green = planned, grey = paused, red line = now.</p></div>
     <div class="card"><h2>Bench time</h2><p class="mu">Most time on the bench first.</p><div id="rank"></div></div>
     <div class="card"><h2>Players</h2><table><tr><th>Player</th><th>Now</th><th>Played</th><th>Bench</th><th></th></tr>${P.all.map(id=>`<tr><td>${nm(id)}</td><td id="s${id}"></td><td id="p${id}"></td><td id="b${id}"></td><td id="a${id}"></td></tr>`).join('')}</table>
-    <p class="mu">"End" is the expected field time at the final whistle. <b>Pause</b>: a player on the field is out for any reason. <b>Play</b>: puts a bench player on the field and starts his timer, for example to cover a paused player. <b>Resume</b>: a paused player returns, and a covering player goes back to the bench. <b>GK</b>: makes this player the goalkeeper; the current goalkeeper takes his place. The plan is recalculated after every action.</p></div>
+    <p class="mu">"End" is the expected field time at the final whistle. <b>Pause</b>: a player on the field is out for any reason. <b>Bench</b>: moves a player on the field to the bench, for example when they are not playing for another reason. The plan is recalculated after every action.</p></div>
     <div class="card"><h2>Substitutions</h2>${evAll().map(e=>`<div class="ev"><b>${fmt(e.t)}</b>${e.note?` ⏸ ${e.note}`:''}${e.o.length?`<br><span class="out">Out:</span> ${e.o.map(nm).join(', ')}`:''}${e.i.length?`<br><span class="in">In:</span> ${e.i.map(nm).join(', ')}`:''}</div>`).join('')||'<p class="mu">No swaps needed.</p>'}</div>`;
     $('#pl').onclick=()=>{sync();if(!run){setTm({run:true,start:Date.now()});startTick()}else{setTm({run:false,base:elapsed()});stop()}sync();$('#pl').textContent=run?'Pause':'Start';upd()};
     $('#rs').onclick=()=>{newGame();render()};
@@ -145,15 +139,15 @@ function upd(){
   const all=evAll(),idx=all.findIndex(e=>e.t>el+1e-9);
   $('#nx').textContent=el>=T?'Game over':idx<0?'No more swaps':`Next swap in ${fmt(all[idx].t-el)}`;
   document.querySelectorAll('.ev').forEach((d,i)=>d.className='ev'+(i===idx?' next':i<(idx<0?99:idx)?' done':''));
-  const cur=stateAt(el),full=cur.field.length>=plan.F;
+  const cur=stateAt(el);
   plan.all.forEach(id=>{const s=document.getElementById('s'+id),p=document.getElementById('p'+id),a=document.getElementById('a'+id);if(!s)return;
-    const st=id===cur.g?'GK':cur.inj.includes(id)?'Paused':cur.cov.includes(id)?'Cover':cur.field.includes(id)?'Field':'Bench';
+    const st=id===cur.g?'GK':cur.inj.includes(id)?'Paused':cur.field.includes(id)?'Field':'Bench';
     s.textContent=st;s.style.color=st==='Paused'?'var(--bad)':st==='Bench'?'':'var(--ac)';p.textContent=fmt(cur.ft[id]);document.getElementById('b'+id).textContent=fmt(cur.bt[id]);
-    const key=st+(st==='Bench'&&full?'x':'');
-    if(a.dataset.k!==key){a.dataset.k=key;const b=(l,c,pr)=>`<button class="btn${pr?'':' s'} sm" data-act="${c}" data-id="${id}">${l}</button>`,gk=b('GK','gk');
-      a.innerHTML='<div class="ac">'+(st==='GK'?'':st==='Paused'?b('Resume','resume',1):st==='Bench'?(full?'<button class="btn sm" disabled>Play</button>':b('Play','play',1))+gk:b('Pause','pause')+b('Bench','bench')+gk)+'</div>'}});
+    const key=st;
+    if(a.dataset.k!==key){a.dataset.k=key;const b=(l,c,pr)=>`<button class="btn${pr?'':' s'} sm" data-act="${c}" data-id="${id}">${l}</button>`;
+      a.innerHTML='<div class="ac">'+(st==='GK'?'':st==='Paused'?b('Resume','resume',1):st==='Bench'?'':b('Pause','pause')+b('Bench','bench'))+'</div>'}});
   $('#rank').innerHTML=plan.all.filter(id=>id!==plan.g).sort((a,b)=>cur.bt[b]-cur.bt[a]).map((id,i)=>`<div class="pl"><span>${i+1}. ${nm(id)}</span><b>${fmt(cur.bt[id])}</b></div>`).join('')||'<p class="mu">No players.</p>';
-  $('#warn').textContent=el<plan.T&&cur.field.length<plan.F?`Only ${cur.field.length} of ${plan.F} outfield spots filled. Tap Play on a bench player.`:'';
+  $('#warn').textContent=el<plan.T&&cur.field.length<plan.F?`Only ${cur.field.length} of ${plan.F} outfield spots filled. Bench players come on at the next planned swap.`:'';
   gantt();const due=all.filter(e=>!e.note&&e.t<=el+1e-9).length;
   if(run&&due>fired){try{navigator.vibrate&&navigator.vibrate([300,150,300])}catch(e){}}
   fired=Math.max(fired,due);
@@ -161,7 +155,7 @@ function upd(){
 function gantt(){const g=$('#gantt');if(!g||!plan||plan.err)return;
   const P=plan,T=P.T,W=360,L=66,Rm=8,rh=22,H=P.all.length*rh+26,x=t=>L+(W-L-Rm)*t/T,op={},seg={},ps={},pz={};
   P.all.forEach(i=>{seg[i]=[];pz[i]=[]});P.start.forEach(i=>op[i]=0);
-  evAll().forEach(e=>{if(e.gc&&e.gcb){const[a,b]=e.gc;if(op[a]!==undefined){seg[a].push([op[a],e.t]);delete op[a]}op[b]=e.t}e.o.forEach(i=>{if(op[i]!==undefined){seg[i].push([op[i],e.t]);delete op[i]}});e.i.forEach(i=>op[i]=e.t);
+  evAll().forEach(e=>{e.o.forEach(i=>{if(op[i]!==undefined){seg[i].push([op[i],e.t]);delete op[i]}});e.i.forEach(i=>op[i]=e.t);
     if(e.p!==undefined){if(e.pon)ps[e.p]=e.t;else if(ps[e.p]!==undefined){pz[e.p].push([ps[e.p],e.t]);delete ps[e.p]}}});
   Object.keys(op).forEach(i=>seg[i].push([op[i],T]));Object.keys(ps).forEach(i=>pz[i].push([ps[i],el]));
   const rect=(a,b,c,y)=>b>a+1e-6?`<rect class="${c}" x="${x(a)}" y="${y}" width="${x(b)-x(a)}" height="${rh-8}" rx="2"/>`:'';
