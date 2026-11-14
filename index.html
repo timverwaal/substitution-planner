@@ -71,7 +71,8 @@ const evAll=()=>plan.hist.concat(plan.ev);
 function act(kind,id){
   sync();
   const past=plan.ev.filter(e=>e.t<=el+1e-9),st=stateAt(el),n=nm(id),e={t:el,o:[],i:[]};let note;
-  if(kind==='bench'){st.field=st.field.filter(x=>x!==id);if(!st.bench.includes(id))st.bench.push(id);e.o=[id];note=`${n} to the bench (manual)`}
+  if(kind==='field'){if(st.field.length>=plan.F)return;st.bench=st.bench.filter(x=>x!==id);st.field.push(id);e.i=[id];note=`${n} removed from the bench`}
+  else if(kind==='bench'){st.field=st.field.filter(x=>x!==id);if(!st.bench.includes(id))st.bench.push(id);e.o=[id];note=`${n} to the bench (manual)`}
   e.note=note;plan.hist.push(...past,e);plan.base=st;replan();render();
 }
 
@@ -118,7 +119,7 @@ function render(){
     <div class="card"><h2>Timeline</h2><div id="gantt"></div><p class="mu">Solid green = time played, light green = planned, red line = now.</p></div>
     <div class="card"><h2>Bench time</h2><p class="mu">Most time on the bench first.</p><div id="rank"></div></div>
     <div class="card"><h2>Players</h2><table><tr><th>Player</th><th>Now</th><th>Played</th><th>Bench</th><th></th></tr>${P.all.map(id=>`<tr><td>${nm(id)}</td><td id="s${id}"></td><td id="p${id}"></td><td id="b${id}"></td><td id="a${id}"></td></tr>`).join('')}</table>
-    <p class="mu">"End" is the expected field time at the final whistle. <b>Bench</b>: moves a player on the field to the bench, for example when they are not playing for another reason. The plan is recalculated after every action.</p></div>
+    <p class="mu">"End" is the expected field time at the final whistle. <b>Bench</b>: moves a player on the field to the bench, for example when they are not playing for another reason. <b>Remove from bench</b>: brings a bench player onto the field, when there is a free spot. The plan is recalculated after every action.</p></div>
     <div class="card"><h2>Substitutions</h2>${evAll().map(e=>`<div class="ev"><b>${fmt(e.t)}</b>${e.note?` ⏸ ${e.note}`:''}${e.o.length?`<br><span class="out">Out:</span> ${e.o.map(nm).join(', ')}`:''}${e.i.length?`<br><span class="in">In:</span> ${e.i.map(nm).join(', ')}`:''}</div>`).join('')||'<p class="mu">No swaps needed.</p>'}</div>`;
     $('#pl').onclick=()=>{sync();if(!run){setTm({run:true,start:Date.now()});startTick()}else{setTm({run:false,base:elapsed()});stop()}sync();$('#pl').textContent=run?'Pause':'Start';upd()};
     $('#rs').onclick=()=>{newGame();render()};
@@ -135,15 +136,15 @@ function upd(){
   const all=evAll(),idx=all.findIndex(e=>e.t>el+1e-9);
   $('#nx').textContent=el>=T?'Game over':idx<0?'No more swaps':`Next swap in ${fmt(all[idx].t-el)}`;
   document.querySelectorAll('.ev').forEach((d,i)=>d.className='ev'+(i===idx?' next':i<(idx<0?99:idx)?' done':''));
-  const cur=stateAt(el);
+  const cur=stateAt(el),full=cur.field.length>=plan.F;
   plan.all.forEach(id=>{const s=document.getElementById('s'+id),p=document.getElementById('p'+id),a=document.getElementById('a'+id);if(!s)return;
     const st=id===cur.g?'GK':cur.field.includes(id)?'Field':'Bench';
     s.textContent=st;s.style.color=st==='Bench'?'':'var(--ac)';p.textContent=fmt(cur.ft[id]);document.getElementById('b'+id).textContent=fmt(cur.bt[id]);
-    const key=st;
+    const key=st+(st==='Bench'&&full?'x':'');
     if(a.dataset.k!==key){a.dataset.k=key;const b=(l,c,pr)=>`<button class="btn${pr?'':' s'} sm" data-act="${c}" data-id="${id}">${l}</button>`;
-      a.innerHTML='<div class="ac">'+(st==='Field'?b('Bench','bench'):'')+'</div>'}});
+      a.innerHTML='<div class="ac">'+(st==='Field'?b('Bench','bench'):st==='Bench'?(full?'<button class="btn sm" disabled>Remove from bench</button>':b('Remove from bench','field',1)):'')+'</div>'}});
   $('#rank').innerHTML=plan.all.filter(id=>id!==plan.g).sort((a,b)=>cur.bt[b]-cur.bt[a]).map((id,i)=>`<div class="pl"><span>${i+1}. ${nm(id)}</span><b>${fmt(cur.bt[id])}</b></div>`).join('')||'<p class="mu">No players.</p>';
-  $('#warn').textContent=el<plan.T&&cur.field.length<plan.F?`Only ${cur.field.length} of ${plan.F} outfield spots filled. Bench players come on at the next planned swap.`:'';
+  $('#warn').textContent=el<plan.T&&cur.field.length<plan.F?`Only ${cur.field.length} of ${plan.F} outfield spots filled. Tap Remove from bench on a bench player, or wait for the next planned swap.`:'';
   gantt();const due=all.filter(e=>!e.note&&e.t<=el+1e-9).length;
   if(run&&due>fired){try{navigator.vibrate&&navigator.vibrate([300,150,300])}catch(e){}}
   fired=Math.max(fired,due);
