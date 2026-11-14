@@ -63,7 +63,9 @@ function build(){
   K=Math.min(K,F,n-F);const ft={},bt={};all.forEach(i=>{ft[i]=0;bt[i]=0});
   const P={all,g,pr,bs,n,F,K,R,T,d:T*K/(n*R),hist:[],base:{t:0,field:pr.slice(0,F),bench:pr.slice(F),ft,bt,inj:[],g},start:g?[g,...pr.slice(0,F)]:pr.slice(0,F),fieldAvg:T*F/n,benchAvg:T*(n-F)/n};
   return P}
-function ensure(){if(!plan){plan=build();if(!plan.err)replan()}}
+function ensure(){if(!plan){plan=build();if(!plan.err){plan.ob=cl(plan.base);replan();plan.orig={ev:plan.ev,ft:plan.fin,bt:plan.finb}}}}
+/* the original plan, computed from the start and never changed by manual moves */
+function planAt(t){const st=cl(plan.ob);for(const e of plan.orig.ev){if(e.t>t+1e-9)break;adv(st,e.t);apply(st,e)}adv(st,Math.max(t,st.t));return st}
 function stateAt(t){const st=cl(plan.base);for(const e of plan.ev){if(e.t>t+1e-9)break;adv(st,e.t);apply(st,e)}adv(st,Math.max(t,st.t));return st}
 const evAll=()=>plan.hist.concat(plan.ev);
 
@@ -117,6 +119,8 @@ function render(){
     <div class="card"><div class="big" id="clk"></div><div class="mu" style="text-align:center" id="nx"></div><div class="err" style="text-align:center" id="warn"></div>
     <div class="row" style="margin-top:10px"><button class="btn" id="pl">${run?'Pause':'Start'}</button><button class="btn s" id="rs">Reset</button></div></div>
     <div class="card"><h2>Timeline</h2><div id="gantt"></div><p class="mu">Solid green = time played, light green = planned, red line = now.</p></div>
+    <div class="card"><h2>Plan vs actual</h2><p class="mu">The original plan stays fixed. Actual is what happened, including manual moves. Bench time in minutes:seconds.</p><div id="pva"></div></div>
+    <div class="card"><h2>Original plan</h2><p class="mu" id="npl"></p><div id="oplan"></div></div>
     <div class="card"><h2>Bench time</h2><p class="mu">Most time on the bench first.</p><div id="rank"></div></div>
     <div class="card"><h2>Players</h2><table><tr><th>Player</th><th>Now</th><th>Played</th><th>Bench</th><th></th></tr>${P.all.map(id=>`<tr><td>${nm(id)}</td><td id="s${id}"></td><td id="p${id}"></td><td id="b${id}"></td><td id="a${id}"></td></tr>`).join('')}</table>
     <p class="mu">"End" is the expected field time at the final whistle. <b>Bench</b>: moves a player on the field to the bench, for example when they are not playing for another reason. <b>Remove from bench</b>: brings a bench player onto the field, when there is a free spot. The plan is recalculated after every action.</p></div>
@@ -143,6 +147,11 @@ function upd(){
     const key=st+(st==='Bench'&&full?'x':'');
     if(a.dataset.k!==key){a.dataset.k=key;const b=(l,c,pr)=>`<button class="btn${pr?'':' s'} sm" data-act="${c}" data-id="${id}">${l}</button>`;
       a.innerHTML='<div class="ac">'+(st==='Field'?b('Bench','bench'):st==='Bench'?(full?'<button class="btn sm" disabled>Remove from bench</button>':b('Remove from bench','field',1)):'')+'</div>'}});
+  const pl=planAt(el),pv=plan.all.filter(id=>id!==plan.g);
+  $('#pva').innerHTML=`<table><tr><th>Player</th><th>Plan now</th><th>Actual now</th><th>Plan total</th><th>Projected</th></tr>${pv.map(id=>`<tr><td>${nm(id)}</td><td>${fmt(pl.bt[id])}</td><td>${fmt(cur.bt[id])}</td><td>${fmt(plan.orig.bt[id])}</td><td>${fmt(plan.finb[id])}</td></tr>`).join('')}</table><p class="mu">Projected = actual so far plus the rest of the game with the current execution. Manual moves so far: ${plan.hist.filter(e=>e.note).length}.</p>`;
+  const nx=plan.orig.ev.findIndex(e=>e.t>el+1e-9);
+  $('#npl').textContent=el>=plan.T?'Game over':nx<0?'No more planned swaps':`Next planned swap at ${fmt(plan.orig.ev[nx].t)}`;
+  $('#oplan').innerHTML=plan.orig.ev.map((e,i)=>`<div class="ev${i===nx?' next':i<nx||(nx<0)?' done':''}"><b>${fmt(e.t)}</b><br><span class="out">Out:</span> ${e.o.map(nm).join(', ')}<br><span class="in">In:</span> ${e.i.map(nm).join(', ')}</div>`).join('')||'<p class="mu">No planned swaps.</p>';
   $('#rank').innerHTML=plan.all.filter(id=>id!==plan.g).sort((a,b)=>cur.bt[b]-cur.bt[a]).map((id,i)=>`<div class="pl"><span>${i+1}. ${nm(id)}</span><b>${fmt(cur.bt[id])}</b></div>`).join('')||'<p class="mu">No players.</p>';
   $('#warn').textContent=el<plan.T&&cur.field.length<plan.F?`Only ${cur.field.length} of ${plan.F} outfield spots filled. Tap Remove from bench on a bench player, or wait for the next planned swap.`:'';
   gantt();const due=all.filter(e=>!e.note&&e.t<=el+1e-9).length;
